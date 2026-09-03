@@ -27,32 +27,9 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y \
             bc bison build-essential ccache curl flex git gnupg gperf \
-            libelf-dev liblz4-tool libncurses5-dev libssl-dev lzop rsync zip zlib1g-dev jq
-
-      - name: Restore ccache
-        uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: ccache-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: ccache-${{ runner.os }}-
-
-      - name: Cache Clang 20
-        id: cache-llvm
-        uses: actions/cache@v4
-        with:
-          path: llvm
-          key: llvm-mlgo-r547379
-
-      - name: Setup Clang 20
-        run: |
-          if [ ! -d "llvm/bin" ]; then
-            export LLVM_DIR="$PWD/llvm"
-            rm -rf "$LLVM_DIR"
-            mkdir -p "$LLVM_DIR"
-            wget -qO- "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz" | tar xz -C "$LLVM_DIR"
-            wget -qO- "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/mlgo-models.tar.gz" | tar xz -C "$LLVM_DIR" || true
-          fi
-          echo "$PWD/llvm/bin" >> $GITHUB_PATH
+            libelf-dev liblz4-tool libncurses5-dev libssl-dev lzop \
+            python3 python-is-python3 rsync zip zlib1g-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Setup ccache
         run: |
@@ -62,44 +39,43 @@ jobs:
           ccache -o hash_dir=false
           ccache -z
 
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: ccache-${{ runner.os }}-
+
       - name: Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
-          export PATH="$PWD/llvm/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
           export KBUILD_BUILD_USER="youffx"
           export KBUILD_BUILD_HOST="collection"
           export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
-          export CC="ccache clang"
-          export CXX="ccache clang++"
+          export CC="ccache gcc"
           export CCACHE_COMPILERCHECK=content
           export CCACHE_MAXSIZE=10G
 
           ccache -s
 
-          make O=out vendor/xiaomi/miatoll_defconfig
-          make O=out olddefconfig
+          make vendor/xiaomi/miatoll_defconfig
+          make olddefconfig
 
-          make -j$(nproc --all) O=out \
+          make -j$(nproc --all) \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            CC="ccache clang" \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            Image.gz-dtb 2>&1 | tee build.log || (tail -100 build.log && exit 1)
+            Image.gz dtbo.img 2>&1 | tee build.log || (tail -100 build.log && exit 1)
 
       - name: Upload kernel image
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ github.run_id }}
-          path: out/arch/arm64/boot/Image.gz-dtb
+          path: |
+            arch/arm64/boot/Image.gz
+            arch/arm64/boot/dtbo.img
           retention-days: 14
 
       - name: Show ccache statistics
@@ -112,4 +88,4 @@ jobs:
         run: |
           echo "commit=$(git log -1 --format='%h %s')" >> $GITHUB_OUTPUT
           echo "version=$(make kernelversion)" >> $GITHUB_OUTPUT
-          echo "compiler=$(llvm/bin/clang --version | head -n 1 | cut -d'(' -f1)" >> $GITHUB_OUTPUT
+          echo "compiler=$(aarch64-linux-gnu-gcc --version | head -n 1)" >> $GITHUB_OUTPUT
