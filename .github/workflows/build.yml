@@ -2,9 +2,6 @@ name: Build Kernel
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "*"
 
 jobs:
   build:
@@ -34,7 +31,22 @@ jobs:
             lld \
             llvm \
             python3 \
-            python-is-python3
+            python-is-python3 \
+            ccache
+
+      - name: Configure ccache
+        run: |
+          sudo ln -sf /usr/lib/ccache/bin/gcc /usr/lib/ccache/bin/aarch64-linux-gnu-gcc
+          sudo ln -sf /usr/lib/ccache/bin/gcc /usr/lib/ccache/bin/gcc
+          echo "/usr/lib/ccache" >> $GITHUB_PATH
+          ccache --max-size=2G
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
 
       - name: Build kernel
         run: |
@@ -42,4 +54,14 @@ jobs:
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make vendor/xiaomi/miatoll_defconfig
-          make -j$(nproc)
+          make -j$(nproc) 2>&1 | tee build.log || (tail -100 build.log && exit 1)
+
+      - name: Upload kernel image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ github.run_id }}
+          path: |
+            arch/arm64/boot/Image
+            arch/arm64/boot/Image.gz
+          retention-days: 14
