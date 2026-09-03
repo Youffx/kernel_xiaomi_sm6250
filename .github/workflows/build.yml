@@ -1,0 +1,45 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup KernelSU-Next
+        run: |
+          curl -LSs https://raw.githubusercontent.com/Youffx/KernelSU-Next/dev-legacy/kernel/setup.sh | bash -s dev-legacy
+
+      - name: Setup build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libncurses-dev \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            clang \
+            lld \
+            llvm \
+            python3 \
+            python-is-python3
+
+      - name: Build kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make miatoll_defconfig
+          make -j$(nproc)
