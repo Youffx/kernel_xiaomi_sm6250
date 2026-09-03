@@ -5,8 +5,10 @@
 
 ccflags-y := -fno-function-sections -fno-data-sections
 ifdef CONFIG_INLINE_OPTIMIZATION
+ifeq ($(cc-name),clang)
 ccflags-y += -mllvm -inline-threshold=15000
 ccflags-y += -mllvm -inlinehint-threshold=10000
+endif
 endif
 
 obj-y                          := main.o version.o mounts.o

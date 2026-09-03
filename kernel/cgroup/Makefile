@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0
 
 ifdef CONFIG_INLINE_OPTIMIZATION
+ifeq ($(cc-name),clang)
 ccflags-y += -mllvm -inline-threshold=15000
 ccflags-y += -mllvm -inlinehint-threshold=10000
+endif
 endif
 
 obj-y := cgroup.o namespace.o cgroup-v1.o freezer.o

@@ -767,15 +767,17 @@ KBUILD_CFLAGS	+= -mllvm -polly-run-dce
 endif
 endif # CONFIG_LLVM_POLLY
 
-endif # $(cc-name),clang
-endif # CONFIG_CC_OPTIMIZE_FOR_SIZE
-
 ifdef CONFIG_INLINE_OPTIMIZATION
+ifeq ($(cc-name),clang)
 KBUILD_CFLAGS	+= -mllvm -inline-threshold=2000
 KBUILD_CFLAGS	+= -mllvm -inlinehint-threshold=3000
 KBUILD_CFLAGS   += -mllvm -unroll-threshold=1200
 KBUILD_LDFLAGS  += --plugin-opt=-import-instr-limit=40
 endif
+endif
+
+endif # $(cc-name),clang
+endif # CONFIG_CC_OPTIMIZE_FOR_SIZE
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
