@@ -187,6 +187,22 @@ jobs:
             CLANG_TRIPLE=aarch64-linux-gnu- \
             Image.gz dtbo.img 2>&1 | tee build.log || (tail -100 build.log && exit 1)
 
+      - name: Package AnyKernel3 zip
+        if: success()
+        run: |
+          curl -sLo ak3.zip https://github.com/osm0sis/AnyKernel3/archive/master.zip
+          unzip -qo ak3.zip -d AnyKernel3
+          rm -f ak3.zip
+
+          cd AnyKernel3
+          rm -rf ramdisk patch modules README.md .github
+          cp ../anykernel.sh .
+          cp ../arch/arm64/boot/Image.gz .
+          cp ../arch/arm64/boot/dtbo.img .
+
+          zip -r9 ../AnyKernel3-${{ inputs.compiler || 'clang' }}-${{ github.run_id }}.zip \
+            * -x '.git/*' 'LICENSE'
+
       - name: Upload kernel image
         if: always()
         uses: actions/upload-artifact@v4
@@ -195,6 +211,14 @@ jobs:
           path: |
             arch/arm64/boot/Image.gz
             arch/arm64/boot/dtbo.img
+          retention-days: 14
+
+      - name: Upload AnyKernel3 zip
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-${{ inputs.compiler || 'clang' }}-${{ github.run_id }}
+          path: AnyKernel3-${{ inputs.compiler || 'clang' }}-${{ github.run_id }}.zip
           retention-days: 14
 
       - name: Show ccache statistics
