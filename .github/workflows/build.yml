@@ -2,6 +2,15 @@ name: Build Kernel
 
 on:
   workflow_dispatch:
+    inputs:
+      compiler:
+        description: 'Select compiler'
+        required: true
+        default: 'clang'
+        type: choice
+        options:
+          - gcc
+          - clang
 
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -22,7 +31,47 @@ jobs:
         run: |
           curl -LSs https://raw.githubusercontent.com/Youffx/KernelSU-Next/dev-legacy/kernel/setup.sh | bash -s dev-legacy
 
-      - name: Install Dependencies
+      - name: Apply KernelSU source patches early
+        run: |
+          sed -i '/^static bool is_mnt_ns_file/i \
+          static int can_umount(const struct path *path, int flags)\n\
+          {\n\t\
+                  struct mount *mnt = real_mount(path->mnt);\n\t\
+                  if (flags \& ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))\n\t\t\
+                          return -EINVAL;\n\t\
+                  if (!may_mount())\n\t\t\
+                          return -EPERM;\n\t\
+                  if (path->dentry != path->mnt->mnt_root)\n\t\t\
+                          return -EINVAL;\n\t\
+                  if (!check_mnt(mnt))\n\t\t\
+                          return -EINVAL;\n\t\
+                  if (mnt->mnt.mnt_flags \& MNT_LOCKED)\n\t\t\
+                          return -EINVAL;\n\t\
+                  if (flags \& MNT_FORCE \&\& !capable(CAP_SYS_ADMIN))\n\t\t\
+                          return -EPERM;\n\t\
+                  return 0;\n\
+          }\n\n\
+          int path_umount(struct path *path, int flags)\n\
+          {\n\t\
+                  struct mount *mnt = real_mount(path->mnt);\n\t\
+                  int ret;\n\t\
+                  ret = can_umount(path, flags);\n\t\
+                  if (!ret)\n\t\t\
+                          ret = do_umount(mnt, flags);\n\t\
+                  dput(path->dentry);\n\t\
+                  mntput_no_expire(mnt);\n\t\
+                  return ret;\n\
+          }' fs/namespace.c
+          if ! grep -q "^int path_umount" fs/internal.h; then
+            sed -i '/^extern void __init mnt_init/a int path_umount(struct path *path, int flags);' fs/internal.h
+          fi
+          if ! grep -q "atomic_t filter_count;" include/linux/seccomp.h; then
+            sed -i '/int mode;/a\\tatomic_t filter_count;' include/linux/seccomp.h
+            sed -i '/#include <linux\/thread_info.h>/a\\#include <linux/atomic.h>' include/linux/seccomp.h
+          fi
+
+      - name: Install Dependencies (GCC)
+        if: inputs.compiler == 'gcc' || inputs.compiler == ''
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -30,6 +79,28 @@ jobs:
             libelf-dev liblz4-tool libncurses5-dev libssl-dev lzop \
             python3 python-is-python3 rsync zip zlib1g-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Install Dependencies (Clang)
+        if: inputs.compiler == 'clang'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex git gnupg gperf \
+            libelf-dev liblz4-tool libncurses5-dev libssl-dev lzop \
+            python3 python-is-python3 rsync zip zlib1g-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            clang-18 lld-18 llvm-18 llvm-18-dev
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+          sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-18 100
+          sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-18 100
+          sudo update-alternatives --install /usr/bin/llvm-nm llvm-nm /usr/bin/llvm-nm-18 100
+          sudo update-alternatives --install /usr/bin/llvm-strip llvm-strip /usr/bin/llvm-strip-18 100
+          sudo update-alternatives --install /usr/bin/llvm-objcopy llvm-objcopy /usr/bin/llvm-objcopy-18 100
+          sudo update-alternatives --install /usr/bin/llvm-objdump llvm-objdump /usr/bin/llvm-objdump-18 100
+          sudo update-alternatives --install /usr/bin/llvm-readelf llvm-readelf /usr/bin/llvm-readelf-18 100
+          sudo update-alternatives --install /usr/bin/llvm-size llvm-size /usr/bin/llvm-size-18 100
+          sudo ln -sf /usr/bin/ld.lld-18 /usr/bin/ld.lld
 
       - name: Setup ccache
         run: |
@@ -46,8 +117,10 @@ jobs:
           key: ccache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: ccache-${{ runner.os }}-
 
-      - name: Build Kernel
+      - name: Build Kernel (GCC)
+        if: inputs.compiler == 'gcc'
         run: |
+          set -o pipefail
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
@@ -68,11 +141,57 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             Image.gz dtbo.img 2>&1 | tee build.log || (tail -100 build.log && exit 1)
 
+      - name: Build Kernel (Clang)
+        if: inputs.compiler == 'clang'
+        run: |
+          set -o pipefail
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export KBUILD_BUILD_USER="youffx"
+          export KBUILD_BUILD_HOST="collection"
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CC="ccache clang"
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export STRIP=llvm-strip
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export OBJSIZE=llvm-size
+          export READELF=llvm-readelf
+          export HOSTCC=clang
+          export HOSTCXX=clang++
+          export HOSTAR=llvm-ar
+          export HOSTLD=ld.lld
+          export CCACHE_COMPILERCHECK=content
+          export CCACHE_MAXSIZE=10G
+
+          ccache -s
+
+          make vendor/xiaomi/miatoll_defconfig
+          make olddefconfig
+
+          make -j$(nproc --all) \
+            ARCH=arm64 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            READELF=llvm-readelf \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            Image.gz dtbo.img 2>&1 | tee build.log || (tail -100 build.log && exit 1)
+
       - name: Upload kernel image
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ github.run_id }}
+          name: kernel-${{ inputs.compiler || 'clang' }}-${{ github.run_id }}
           path: |
             arch/arm64/boot/Image.gz
             arch/arm64/boot/dtbo.img
@@ -88,4 +207,8 @@ jobs:
         run: |
           echo "commit=$(git log -1 --format='%h %s')" >> $GITHUB_OUTPUT
           echo "version=$(make kernelversion)" >> $GITHUB_OUTPUT
-          echo "compiler=$(aarch64-linux-gnu-gcc --version | head -n 1)" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.compiler }}" = "clang" ]; then
+            echo "compiler=$(clang --version | head -n 1)" >> $GITHUB_OUTPUT
+          else
+            echo "compiler=$(aarch64-linux-gnu-gcc --version | head -n 1)" >> $GITHUB_OUTPUT
+          fi
