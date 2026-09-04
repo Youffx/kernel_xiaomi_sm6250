@@ -176,7 +176,6 @@ msm_drm-$(CONFIG_DRM_MSM) += \
 	sde/sde_hw_util.o \
 	sde/sde_hw_sspp.o \
 	sde/sde_hw_wb.o \
-	sde/sde_hw_rot.o \
 	sde/sde_hw_pingpong.o \
 	sde/sde_hw_top.o \
 	sde/sde_hw_interrupts.o \
@@ -193,6 +192,8 @@ msm_drm-$(CONFIG_DRM_MSM) += \
 
 msm_drm-$(CONFIG_DRM_SDE_WB) += sde/sde_wb.o \
 	sde/sde_encoder_phys_wb.o
+
+msm_drm-$(CONFIG_MSM_SDE_ROTATOR) += sde/sde_hw_rot.o
 
 msm_drm-$(CONFIG_DRM_SDE_SHD) += shd/shd_drm.o \
 	shd/shd_hw.o \
